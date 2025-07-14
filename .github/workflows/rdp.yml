@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Download ngrok v3
         run: |
-          Invoke-WebRequest https://bin.equinox.io/a/cRzjz5DVa33/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .\ngrok
         shell: powershell
 
