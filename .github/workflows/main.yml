@@ -3,15 +3,12 @@ on: [workflow_dispatch]
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
       - name: Download ngrok
         run: |
           Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-          Expand-Archive ngrok.zip -DestinationPath .
-          dir  # التحقق من وجود ngrok.exe
-          .\ngrok.exe config add-authtoken 2y25SLlLKReDIlBtmWchrQmA2VT_2zzT67jc6oMTzbovkeUxq
-        shell: powershell
+          Expand-Archive ngrok.zip
+          ./ngrok.exe authtoken 2y25SLlLKReDIlBtmWchrQmA2VT_2zzT67jc6oMTzbovkeUxq
 
       - name: Enable RDP
         run: |
@@ -19,5 +16,4 @@ jobs:
           net localgroup administrators kamel123 /add
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          .\ngrok.exe tcp 3389
-        shell: powershell
+          ./ngrok.exe tcp 3389
