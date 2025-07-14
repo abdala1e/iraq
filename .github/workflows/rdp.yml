@@ -1,4 +1,4 @@
-name: Windows RDP via Ngrok
+name: Windows RDP via Ngrok (v3)
 on: [workflow_dispatch]
 
 jobs:
@@ -7,14 +7,14 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Download ngrok
+      - name: Download ngrok v3
         run: |
-          Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+          Invoke-WebRequest https://bin.equinox.io/a/cRzjz5DVa33/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .\ngrok
         shell: powershell
 
       - name: Authenticate ngrok
-        run: .\ngrok\ngrok.exe authtoken 2y25SLlLKReDIlBtmWchrQmA2VT_2zzT67jc6oMTzbovkeUxq
+        run: .\ngrok\ngrok.exe config add-authtoken 2y25SLlLKReDIlBtmWchrQmA2VT_2zzT67jc6oMTzbovkeUxq
         shell: powershell
 
       - name: Enable RDP and firewall
