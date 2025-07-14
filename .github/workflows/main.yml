@@ -3,12 +3,13 @@ on: [workflow_dispatch]
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Download ngrok
         run: |
           Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .
-          dir  # للتأكد أن ngrok.exe موجود
+          dir  # التحقق من وجود ngrok.exe
           .\ngrok.exe config add-authtoken 2y25SLlLKReDIlBtmWchrQmA2VT_2zzT67jc6oMTzbovkeUxq
         shell: powershell
 
