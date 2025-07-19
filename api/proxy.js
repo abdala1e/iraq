@@ -2,33 +2,36 @@ export default async function handler(req, res) {
   const { url } = req;
   let path = url.replace("/", "");
 
-  if (path === "" || path === "iraq.m3u8") {
+  if (!path || path === "iraq.m3u8") {
     path = "playlist.m3u8";
   }
 
   const base = "https://svs.itworkscdn.net/smc4sportslive/smc4tv.smil/";
-
   const targetUrl = base + path;
 
-  const fetchRes = await fetch(targetUrl, {
+  const upstreamRes = await fetch(targetUrl, {
     headers: {
       "Referer": "https://www.shabakaty.com/",
       "Origin": "https://www.shabakaty.com/",
-      "User-Agent": req.headers['user-agent'] || ""
+      "User-Agent": req.headers['user-agent'] || "",
     }
   });
 
-  const contentType = fetchRes.headers.get("content-type") || "application/octet-stream";
+  const contentType = upstreamRes.headers.get("content-type") || "";
 
-  // تعديل روابط m3u8
-  if (contentType.includes("application/vnd.apple.mpegurl") || path.endsWith(".m3u8")) {
-    const body = await fetchRes.text();
-
+  if (
+    contentType.includes("application/vnd.apple.mpegurl") ||
+    path.endsWith(".m3u8")
+  ) {
+    const originalText = await upstreamRes.text();
     const origin = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
 
-    const rewritten = body.replace(
+    const rewritten = originalText.replace(
       /^(?!#)(.*\.m3u8|.*\.ts|.*\.key)(\?.*)?$/gm,
-      (line) => `${origin}/${line.split("?")[0]}`
+      (line) => {
+        const cleanLine = line.split("?")[0];
+        return `${origin}/${cleanLine}`;
+      }
     );
 
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
@@ -36,8 +39,10 @@ export default async function handler(req, res) {
     return res.status(200).send(rewritten);
   }
 
-  res.setHeader("Content-Type", contentType);
+  // تمرير الفيديو (ts, key...) بالرؤوس المطلوبة
+  res.setHeader("Content-Type", contentType || "application/octet-stream");
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "*");
 
-  fetchRes.body.pipe(res);
+  upstreamRes.body.pipe(res);
 }
