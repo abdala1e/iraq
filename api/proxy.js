@@ -1,58 +1,52 @@
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    let path = url.pathname.slice(1);
+export default async function handler(req, res) {
+  const { url } = req;
+  let path = url.replace("/", "");
 
-    // إذا ما حددنا ملف، نرجع playlist الأصلي
-    if (!path || path === "iraq.m3u8") {
-      path = "playlist.m3u8";
-    }
+  // المسار الرئيسي إذا ماكو شيء
+  if (!path || path === "iraq.m3u8") {
+    path = ".m3u8";
+  }
 
-    const base = "https://svs.itworkscdn.net/smc4sportslive/smc4tv.smil/";
+  const base = "http://176.119.29.35/01ed3a36-03b2-4f64-9dfa-dea3df61b611";
+  const targetUrl = base + path;
 
-    const targetUrl = base + path;
-
-    const modifiedRequest = new Request(targetUrl, {
-      method: "GET",
+  try {
+    const upstreamRes = await fetch(targetUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://www.smc4.tv/",  // سيرفر itworks يتحقق من الريفير
-        "Origin": "https://www.smc4.tv",
+        "User-Agent": req.headers["user-agent"] || "",
       },
     });
 
-    const upstreamResponse = await fetch(modifiedRequest);
-    const contentType = upstreamResponse.headers.get("Content-Type") || "";
+    const contentType = upstreamRes.headers.get("content-type") || "";
 
-    if (contentType.includes("application/vnd.apple.mpegurl") || path.endsWith(".m3u8")) {
-      const originalText = await upstreamResponse.text();
+    if (
+      contentType.includes("application/vnd.apple.mpegurl") ||
+      path.endsWith(".m3u8")
+    ) {
+      const originalText = await upstreamRes.text();
+      const origin = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
 
-      // إعادة كتابة روابط ts لتشير لنفس البروكسي
+      // إعادة كتابة الروابط الداخلية
       const rewritten = originalText.replace(
-        /^(?!#)(.*\.ts)(\?.*)?$/gm,
+        /^(?!#)(.*\.m3u8|.*\.ts|.*\.key)(\?.*)?$/gm,
         (line) => {
           const cleanLine = line.split("?")[0];
-          return `${url.origin}/${cleanLine}`;
+          return `${origin}/${cleanLine}`;
         }
       );
 
-      return new Response(rewritten, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/vnd.apple.mpegurl",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "*",
-        },
-      });
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return res.status(200).send(rewritten);
     }
 
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      headers: {
-        "Content-Type": contentType,
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "*",
-      },
-    });
+    // ملفات ts أو key مباشرة
+    res.setHeader("Content-Type", contentType || "application/octet-stream");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+
+    upstreamRes.body.pipe(res);
+  } catch (err) {
+    return res.status(502).send("Proxy Error");
   }
 }
