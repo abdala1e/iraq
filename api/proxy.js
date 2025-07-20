@@ -1,3 +1,5 @@
+import { Readable } from 'stream';
+
 export default async function handler(req, res) {
   const { url, headers } = req;
   let path = url.replace("/", "");
@@ -14,22 +16,21 @@ export default async function handler(req, res) {
     const upstreamRes = await fetch(targetUrl, {
       method: "GET",
       headers: {
-        "User-Agent": headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": headers["user-agent"] || "Mozilla/5.0",
         "Referer": "http://195.154.168.111:88/",
         "Origin": "http://195.154.168.111:88",
         "Accept": "*/*",
         "Connection": "keep-alive",
-        "Accept-Encoding": "gzip, deflate",
+        "Accept-Encoding": "identity", // مهمة جداً
         "Accept-Language": headers["accept-language"] || "en-US,en;q=0.9",
         "Host": "195.154.168.111:88",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
+        "Range": req.headers["range"] || "bytes=0-", // مهم لملفات .ts
       }
     });
 
     const contentType = upstreamRes.headers.get("content-type") || "";
 
-    // إذا الملف m3u8 نعيد كتابة الروابط الداخلية
+    // إذا ملف .m3u8 نعدّل روابطه الداخلية
     if (contentType.includes("application/vnd.apple.mpegurl") || path.endsWith(".m3u8")) {
       const originalText = await upstreamRes.text();
       const origin = `${headers["x-forwarded-proto"] || "https"}://${headers.host}`;
@@ -41,18 +42,21 @@ export default async function handler(req, res) {
 
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.status(200).send(rewritten);
-      return;
+      return res.status(200).send(rewritten);
     }
 
-    // لباقي الملفات (ts أو key)
+    // ملفات .ts أو .key — نستخدم buffer بدلاً من pipe لحل مشاكل Vercel
+    const buffer = await upstreamRes.arrayBuffer();
+    const stream = Readable.from(Buffer.from(buffer));
+
     res.setHeader("Content-Type", contentType || "application/octet-stream");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-
-    upstreamRes.body.pipe(res);
+    res.setHeader("Content-Length", Buffer.byteLength(buffer));
+    res.setHeader("Accept-Ranges", "bytes");
+    res.status(upstreamRes.status);
+    stream.pipe(res);
   } catch (err) {
     console.error("Proxy Error:", err.message);
-    res.status(502).send("فشل الاتصال بالسيرفر الأصلي.");
+    res.status(502).send("فشل في الاتصال بالمصدر.");
   }
 }
