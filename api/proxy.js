@@ -15,7 +15,14 @@ export default async function handler(req, res) {
   try {
     const upstreamRes = await fetch(targetUrl, {
       headers: {
-        "User-Agent": req.headers["user-agent"] || "",
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "http://195.154.168.111/",
+        "Origin": "http://195.154.168.111",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": req.headers["accept-language"] || "en-US,en;q=0.9,ar;q=0.8",
+        "Host": "195.154.168.111:88",
       },
     });
 
@@ -49,6 +56,7 @@ export default async function handler(req, res) {
 
     upstreamRes.body.pipe(res);
   } catch (err) {
+    console.error("Fetch failed:", err);
     return res.status(502).send("Proxy Error");
   }
 }
