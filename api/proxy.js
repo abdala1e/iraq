@@ -2,13 +2,15 @@ export default async function handler(req, res) {
   const { url } = req;
   let path = url.replace("/", "");
 
-  // المسار الرئيسي إذا ماكو شيء
+  // إذا لم يتم تحديد ملف، استخدم index.m3u8
   if (!path || path === "iraq.m3u8") {
-    path = ".m3u8";
+    path = "index.m3u8";
   }
 
-  const base = "http://176.119.29.35/01ed3a36-03b2-4f64-9dfa-dea3df61b611";
-  const targetUrl = base + path;
+  // رابط البث الأساسي بدون الملف
+  const base = "http://195.154.168.111:88/bein1/";
+  const token = "?token=U288Sxdn1ol-W0";
+  const targetUrl = base + path + (path.includes("?") ? "" : token);
 
   try {
     const upstreamRes = await fetch(targetUrl, {
@@ -26,9 +28,9 @@ export default async function handler(req, res) {
       const originalText = await upstreamRes.text();
       const origin = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
 
-      // إعادة كتابة الروابط الداخلية
+      // تعديل الروابط الداخلية في ملف m3u8 ليتم تمريرها عبر البروكسي
       const rewritten = originalText.replace(
-        /^(?!#)(.*\.m3u8|.*\.ts|.*\.key)(\?.*)?$/gm,
+        /^(?!#)(.*\.(m3u8|ts|key))(\?.*)?$/gm,
         (line) => {
           const cleanLine = line.split("?")[0];
           return `${origin}/${cleanLine}`;
@@ -40,7 +42,7 @@ export default async function handler(req, res) {
       return res.status(200).send(rewritten);
     }
 
-    // ملفات ts أو key مباشرة
+    // ملفات .ts أو .key أو أي ملفات ثانوية
     res.setHeader("Content-Type", contentType || "application/octet-stream");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "*");
