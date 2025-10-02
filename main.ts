@@ -87,18 +87,16 @@ async function proxyRequest(targetUrl: string, origin: string, playlistUrlFromQu
 
         if (isTsSegment) { lastDeliveredSegmentUrl = currentUrl; }
 
-        // *** بداية الحل الحاسم ***
-        // إنشاء ترويسات جديدة لكل استجابة، مع التأكد من وجود ترويسة CORS
-        const newHeaders = new Headers();
+        // *** بداية الحل الصحيح ***
+        // نأخذ كل الترويسات الأصلية من المصدر
+        const newHeaders = new Headers(response.headers);
+        
+        // نضيف عليها ترويسات CORS للسماح للمتصفح بعرضها
         Object.entries(CORS_HEADERS).forEach(([key, value]) => newHeaders.set(key, value));
-        // *** نهاية الحل الحاسم ***
-
-        response.headers.forEach((value, key) => {
-            if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
-                newHeaders.set(key, value);
-            }
-        });
+        
+        // نضبط ترويسة التخزين المؤقت
         newHeaders.set('Cache-Control', 'no-cache');
+        // *** نهاية الحل الصحيح ***
 
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('mpegurl')) {
@@ -116,6 +114,7 @@ async function proxyRequest(targetUrl: string, origin: string, playlistUrlFromQu
             return new Response(body, { status: response.status, headers: newHeaders });
         }
 
+        // بالنسبة لمقاطع .ts، نرسل الاستجابة مع الترويسات المدمجة (الأصلية + CORS)
         return new Response(response.body, { status: response.status, headers: newHeaders });
 
     } catch (error) {
