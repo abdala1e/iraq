@@ -1,10 +1,13 @@
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 
-// --- الثوابت تبقى كما هي ---
+// --- الثوابت والمتغيرات تبقى كما هي ---
+let lastDeliveredSegmentUrl: string | null = null;
+let lastPlaylistUrl: string | null = null;
 const USER_AGENTS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36", "VLC/3.0.20 LibVLC/3.0.20", "okhttp/4.9.3", "com.google.android.exoplayer2/2.18.1"];
 const CORS_HEADERS = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Expose-Headers': 'Content-Length, Content-Range', 'Access-Control-Allow-Credentials': 'true'};
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// --- الرابط الأصلي للبث ---
 const STREAM_URL = 'http://splus.smartres.net/live/65787/54353/138896.m3u8';
 
 async function handler(req: Request): Promise<Response> {
@@ -15,7 +18,11 @@ async function handler(req: Request): Promise<Response> {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    // --- القاعدة 1: الرابط الرئيسي الذي يطلبه المستخدم ---
     if (url.pathname === '/abdullah.m3u8') {
+        lastDeliveredSegmentUrl = null;
+        lastPlaylistUrl = null;
+        // نعطي المتصفح رابطًا بسيطًا جدًا
         const simplePlaylistUrl = `${origin}/playlist.m3u8`;
         const masterPlaylist = `#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5000000,RESOLUTION=1920x1080,NAME="FHD"\n${simplePlaylistUrl}`;
         
@@ -24,20 +31,20 @@ async function handler(req: Request): Promise<Response> {
         return new Response(masterPlaylist, { headers });
     }
 
+    // --- القاعدة 2: التعامل مع طلب قائمة التشغيل البسيطة ---
     if (url.pathname === '/playlist.m3u8') {
-        return proxyRequest(STREAM_URL, origin, { playlistUrl: STREAM_URL });
+        // هذا الطلب هو في الحقيقة طلب لقائمة التشغيل الأصلية
+        return proxyRequest(STREAM_URL, origin, STREAM_URL);
     }
 
+    // --- القاعدة 3: التعامل مع مقاطع الفيديو .ts ---
     if (url.pathname.startsWith('/segment/')) {
+        // نستخرج الرابط الأصلي للمقطع من الرابط المشفر
         const encodedUrl = url.pathname.replace('/segment/', '');
         try {
-            const targetUrlString = atob(encodedUrl);
-            const params = url.searchParams;
-            const session = {
-                playlistUrl: params.get('p'),
-                lastSegment: params.get('l')
-            };
-            return proxyRequest(targetUrlString, origin, session);
+            const targetUrlString = atob(encodedUrl); // فك تشفير base64
+            const playlistUrlFromQuery = url.searchParams.get('playlist');
+            return proxyRequest(targetUrlString, origin, playlistUrlFromQuery);
         } catch (e) {
             return new Response("Invalid segment URL.", { status: 400, headers: CORS_HEADERS });
         }
@@ -46,24 +53,24 @@ async function handler(req: Request): Promise<Response> {
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
 }
 
-// --- دالة البروكسي الموحدة (مع دعم الجلسات) ---
-async function proxyRequest(targetUrl: string, origin: string, session: { playlistUrl: string | null, lastSegment?: string | null }): Promise<Response> {
+// --- دالة البروكسي الموحدة (قلب الكود) ---
+async function proxyRequest(targetUrl: string, origin: string, playlistUrlFromQuery: string | null): Promise<Response> {
     try {
         let currentUrl = targetUrl;
         const isTsSegment = currentUrl.endsWith('.ts');
 
-        if (isTsSegment && session.lastSegment && currentUrl === session.lastSegment && session.playlistUrl) {
-            console.log(`[Stateless Proxy] Duplicate segment request: ${currentUrl}. Waiting...`);
+        if (isTsSegment && currentUrl === lastDeliveredSegmentUrl && playlistUrlFromQuery) {
+            // ... (منطق المقاطع المكررة الذكي يبقى كما هو)
             let newSegmentFound = false;
             for (let attempt = 0; attempt < 10; attempt++) {
                 await delay(250);
                 try {
-                    const playlistRes = await fetch(session.playlistUrl, { signal: AbortSignal.timeout(2000) });
+                    const playlistRes = await fetch(playlistUrlFromQuery, { signal: AbortSignal.timeout(2000) });
                     if (playlistRes.ok) {
                         const playlistBody = await playlistRes.text();
                         const segments = playlistBody.match(/^[^#\n].*?\.ts/gm);
                         if (segments && segments.length > 0) {
-                            const latestSegment = new URL(segments[segments.length - 1], session.playlistUrl).toString();
+                            const latestSegment = new URL(segments[segments.length - 1], playlistUrlFromQuery).toString();
                             if (latestSegment !== currentUrl) {
                                 currentUrl = latestSegment;
                                 newSegmentFound = true;
@@ -71,7 +78,7 @@ async function proxyRequest(targetUrl: string, origin: string, session: { playli
                             }
                         }
                     }
-                } catch (e) { console.error(`[Stateless Proxy] Error fetching playlist: ${e.message}`); }
+                } catch (e) { console.error(`[Smart Proxy] Error fetching playlist: ${e.message}`); }
             }
             if (!newSegmentFound) {
                 return new Response('Gateway Timeout: Could not find a new segment.', { status: 504, headers: CORS_HEADERS });
@@ -86,25 +93,28 @@ async function proxyRequest(targetUrl: string, origin: string, session: { playli
             return new Response('Failed to fetch from origin.', { status: 502, headers: CORS_HEADERS });
         }
 
-        const newHeaders = new Headers(response.headers);
-        Object.entries(CORS_HEADERS).forEach(([key, value]) => newHeaders.set(key, value));
+        if (isTsSegment) { lastDeliveredSegmentUrl = currentUrl; }
+
+        const newHeaders = new Headers(CORS_HEADERS);
+        response.headers.forEach((value, key) => {
+            if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+                newHeaders.set(key, value);
+            }
+        });
         newHeaders.set('Cache-Control', 'no-cache');
 
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('mpegurl')) {
+            lastPlaylistUrl = currentUrl;
             newHeaders.set('Content-Type', 'application/x-mpegURL');
             let body = await response.text();
             const baseUrl = new URL(currentUrl);
             
-            const segmentsInPlaylist = body.match(/^([^\s#].*)$/gm) || [];
-            let lastSegmentInLoop: string | null = null;
-
+            // إعادة كتابة الروابط لتبدو بسيطة (تشفير base64)
             body = body.replace(/^([^\s#].*)$/gm, line => {
                 const segmentUrl = new URL(line, baseUrl).toString();
-                const encodedSegmentUrl = btoa(segmentUrl);
-                const lastSegParam = lastSegmentInLoop ? `&l=${encodeURIComponent(lastSegmentInLoop)}` : '';
-                lastSegmentInLoop = segmentUrl; // تحديث المقطع الأخير للدورة التالية
-                return `${origin}/segment/${encodedSegmentUrl}?p=${encodeURIComponent(currentUrl)}${lastSegParam}`;
+                const encodedSegmentUrl = btoa(segmentUrl); // تشفير الرابط
+                return `${origin}/segment/${encodedSegmentUrl}?playlist=${encodeURIComponent(currentUrl)}`;
             });
             
             return new Response(body, { status: response.status, headers: newHeaders });
