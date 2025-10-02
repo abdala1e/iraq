@@ -19,10 +19,10 @@ async function handler(req: Request): Promise<Response> {
     }
 
     // --- التعامل مع الرابط الرئيسي /iraq.m3u8 ---
-    if (url.pathname === '/iraq.m3u8') {
+    if (url.pathname === '/abdullah.m3u8') {
         lastDeliveredSegmentUrl = null;
         lastPlaylistUrl = null;
-        const streamUrl = 'http://apk.dream4k.co/live/6gi2up0jbb/dxu4mhmspq/1269943.m3u8';
+        const streamUrl = 'http://splus.smartres.net/live/65787/54353/138896.m3u8';
         const streamURLviaProxy = `${origin}/proxy/${encodeURIComponent(streamUrl)}?playlist=${encodeURIComponent(streamUrl)}`;
         const masterPlaylist = `#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5000000,RESOLUTION=1920x1080,NAME="FHD"\n${streamURLviaProxy}`;
         
