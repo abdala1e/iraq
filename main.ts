@@ -5,14 +5,12 @@ const CORS_HEADERS = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-
 
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    const params = url.searchParams;
     const origin = url.origin;
 
     if (req.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    // --- القاعدة الأولى: للرابط النظيف /iraq.m3u8 ---
     if (url.pathname === '/iraq.m3u8') {
         const streamUrl = 'http://apk.dream4k.co/live/6gi2up0jbb/dxu4mhmspq/1269943.m3u8';
         const streamURLviaProxy = `${origin}/proxy/${encodeURIComponent(streamUrl)}`;
@@ -23,8 +21,6 @@ async function handler(req: Request): Promise<Response> {
         return new Response(masterPlaylist, { headers });
     }
 
-    // *** بداية التعديل: إضافة قاعدة البروكسي ***
-    // --- القاعدة الثانية: للتعامل مع مقاطع الفيديو .ts وقوائم التشغيل الفرعية ---
     if (url.pathname.startsWith('/proxy/')) {
         const targetUrlString = decodeURIComponent(url.pathname.replace('/proxy/', ''));
         
@@ -40,25 +36,33 @@ async function handler(req: Request): Promise<Response> {
 
                 const contentType = response.headers.get('content-type') || '';
                 const newHeaders = new Headers(CORS_HEADERS);
-                response.headers.forEach((value, key) => newHeaders.set(key, value));
+                
+                // *** بداية الحل: تفعيل الإرسال المتدفق ***
+                // تمرير الترويسات الأصلية المهمة مثل حجم المحتوى
+                response.headers.forEach((value, key) => {
+                    if (['content-type', 'content-length', 'accept-ranges'].includes(key.toLowerCase())) {
+                        newHeaders.set(key, value);
+                    }
+                });
 
                 if (contentType.includes('mpegurl')) {
                     let body = await response.text();
                     const baseUrl = new URL(targetUrlString);
-                    // إعادة كتابة الروابط لتمر عبر البروكسي
                     body = body.replace(/^(https?:\/\/[^\s]+)$/gm, line => `${origin}/proxy/${encodeURIComponent(line)}`);
                     body = body.replace(/^([^\s#].*)$/gm, line => `${origin}/proxy/${encodeURIComponent(new URL(line, baseUrl).toString())}`);
                     return new Response(body, { status: response.status, headers: newHeaders });
                 }
 
+                // هذا هو السطر الحاسم: إرسال المحتوى كتدفق مباشر (Streaming)
+                // هذا يمنع التخزين المؤقت البطيء ويرسل البيانات فورًا
                 return new Response(response.body, { status: response.status, headers: newHeaders });
+                // *** نهاية الحل ***
 
             } catch (error) {
                 return new Response(`Proxy error: ${error.message}`, { status: 500, headers: CORS_HEADERS });
             }
         }
     }
-    // *** نهاية التعديل ***
 
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
 }
