@@ -1,131 +1,90 @@
-import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// --- الثوابت والمتغيرات تبقى كما هي ---
-let lastDeliveredSegmentUrl: string | null = null;
-let lastPlaylistUrl: string | null = null;
-const USER_AGENTS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36", "VLC/3.0.20 LibVLC/3.0.20", "okhttp/4.9.3", "com.google.android.exoplayer2/2.18.1"];
-const CORS_HEADERS = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Expose-Headers': 'Content-Length, Content-Range', 'Access-Control-Allow-Credentials': 'true'};
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+serve(async (req) => {
+  const url = new URL(req.url);
+  const playlistUrl = url.searchParams.get("playlist_url");
+  const vidUrl = url.searchParams.get("vid_url");
 
-// --- الرابط الأصلي للبث ---
-const STREAM_URL = 'http://splus.smartres.net/live/65787/54353/138896.m3u8';
+  // ترويسات كسر الحماية الأمنية للمشغلات وتويتر
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+  };
 
-async function handler(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    const origin = url.origin;
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
+  // تزوير الهوية بالكامل أمام سيرفر الـ IPTV
+  const headers = new Headers({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Connection": "keep-alive",
+  });
 
-    // --- القاعدة 1: الرابط الرئيسي الذي يطلبه المستخدم ---
-    if (url.pathname === '/abdullah.m3u8') {
-        lastDeliveredSegmentUrl = null;
-        lastPlaylistUrl = null;
-        // نعطي المتصفح رابطًا بسيطًا جدًا
-        const simplePlaylistUrl = `${origin}/playlist.m3u8`;
-        const masterPlaylist = `#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5000000,RESOLUTION=1920x1080,NAME="FHD"\n${simplePlaylistUrl}`;
-        
-        const headers = new Headers(CORS_HEADERS);
-        headers.set('Content-Type', 'application/x-mpegURL');
-        return new Response(masterPlaylist, { headers });
-    }
-
-    // --- القاعدة 2: التعامل مع طلب قائمة التشغيل البسيطة ---
-    if (url.pathname === '/playlist.m3u8') {
-        // هذا الطلب هو في الحقيقة طلب لقائمة التشغيل الأصلية
-        return proxyRequest(STREAM_URL, origin, STREAM_URL);
-    }
-
-    // --- القاعدة 3: التعامل مع مقاطع الفيديو .ts ---
-    if (url.pathname.startsWith('/segment/')) {
-        // نستخرج الرابط الأصلي للمقطع من الرابط المشفر
-        const encodedUrl = url.pathname.replace('/segment/', '');
-        try {
-            const targetUrlString = atob(encodedUrl); // فك تشفير base64
-            const playlistUrlFromQuery = url.searchParams.get('playlist');
-            return proxyRequest(targetUrlString, origin, playlistUrlFromQuery);
-        } catch (e) {
-            return new Response("Invalid segment URL.", { status: 400, headers: CORS_HEADERS });
-        }
-    }
-
-    return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
-}
-
-// --- دالة البروكسي الموحدة (قلب الكود) ---
-async function proxyRequest(targetUrl: string, origin: string, playlistUrlFromQuery: string | null): Promise<Response> {
+  // [الوضع 1]: جلب القائمة وإعادة صياغة الروابط داخلياً لتعمل عبر نفس الآي بي لقفل الجلسة
+  if (playlistUrl) {
     try {
-        let currentUrl = targetUrl;
-        const isTsSegment = currentUrl.endsWith('.ts');
+      const res = await fetch(playlistUrl, { headers });
+      const text = await res.text();
+      
+      const playlistObj = new URL(playlistUrl);
+      const baseUrl = playlistObj.protocol + "//" + playlistObj.host + playlistObj.pathname.substring(0, playlistObj.pathname.lastIndexOf('/') + 1);
 
-        if (isTsSegment && currentUrl === lastDeliveredSegmentUrl && playlistUrlFromQuery) {
-            // ... (منطق المقاطع المكررة الذكي يبقى كما هو)
-            let newSegmentFound = false;
-            for (let attempt = 0; attempt < 10; attempt++) {
-                await delay(250);
-                try {
-                    const playlistRes = await fetch(playlistUrlFromQuery, { signal: AbortSignal.timeout(2000) });
-                    if (playlistRes.ok) {
-                        const playlistBody = await playlistRes.text();
-                        const segments = playlistBody.match(/^[^#\n].*?\.ts/gm);
-                        if (segments && segments.length > 0) {
-                            const latestSegment = new URL(segments[segments.length - 1], playlistUrlFromQuery).toString();
-                            if (latestSegment !== currentUrl) {
-                                currentUrl = latestSegment;
-                                newSegmentFound = true;
-                                break;
-                            }
-                        }
-                    }
-                } catch (e) { console.error(`[Smart Proxy] Error fetching playlist: ${e.message}`); }
-            }
-            if (!newSegmentFound) {
-                return new Response('Gateway Timeout: Could not find a new segment.', { status: 504, headers: CORS_HEADERS });
-            }
-        }
-
-        const response = await fetch(currentUrl, {
-            headers: { 'User-Agent': USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)] }
-        });
-
-        if (!response.ok) {
-            return new Response('Failed to fetch from origin.', { status: 502, headers: CORS_HEADERS });
-        }
-
-        if (isTsSegment) { lastDeliveredSegmentUrl = currentUrl; }
-
-        const newHeaders = new Headers(CORS_HEADERS);
-        response.headers.forEach((value, key) => {
-            if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
-                newHeaders.set(key, value);
-            }
-        });
-        newHeaders.set('Cache-Control', 'no-cache');
-
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('mpegurl')) {
-            lastPlaylistUrl = currentUrl;
-            newHeaders.set('Content-Type', 'application/x-mpegURL');
-            let body = await response.text();
-            const baseUrl = new URL(currentUrl);
-            
-            // إعادة كتابة الروابط لتبدو بسيطة (تشفير base64)
-            body = body.replace(/^([^\s#].*)$/gm, line => {
-                const segmentUrl = new URL(line, baseUrl).toString();
-                const encodedSegmentUrl = btoa(segmentUrl); // تشفير الرابط
-                return `${origin}/segment/${encodedSegmentUrl}?playlist=${encodeURIComponent(currentUrl)}`;
+      const lines = text.split("\n");
+      const newLines = lines.map(line => {
+        line = line.trim();
+        if (line === "" || line.startsWith("#")) {
+          if (line.toUpperCase().includes('URI="')) {
+            return line.replace(/URI="([^"]+)"/i, (_, p1) => {
+              let fullUrl = p1.startsWith("http") ? p1 : (p1.startsWith("/") ? playlistObj.protocol + "//" + playlistObj.host + p1 : baseUrl + p1);
+              return `URI="${url.origin}?playlist_url=${encodeURIComponent(fullUrl)}"`;
             });
-            
-            return new Response(body, { status: response.status, headers: newHeaders });
+          }
+          return line;
         }
+        let fullUrl = line.startsWith("http") ? line : (line.startsWith("/") ? playlistObj.protocol + "//" + playlistObj.host + line : baseUrl + line);
+        return `${url.origin}?vid_url=${encodeURIComponent(fullUrl)}`;
+      });
 
-        return new Response(response.body, { status: response.status, headers: newHeaders });
-
-    } catch (error) {
-        console.error(`[FATAL] Proxy error: ${error.message}`);
-        return new Response(`Proxy error: ${error.message}`, { status: 500, headers: CORS_HEADERS });
+      return new Response(newLines.join("\n"), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/vnd.apple.mpegurl",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        }
+      });
+    } catch (e) {
+      return new Response("Error: " + e.message, { status: 500, headers: corsHeaders });
     }
-}
+  }
 
-serve(handler);
+  // [الوضع 2]: تمرير فيديو الـ TS بدعم الـ Range وبأداء صارخ السرعة
+  if (vidUrl) {
+    try {
+      if (req.headers.has("range")) {
+        headers.set("range", req.headers.get("range")!);
+      }
+      const targetObj = new URL(vidUrl);
+      headers.set("Origin", targetObj.protocol + "//" + targetObj.host);
+      headers.set("Referer", targetObj.protocol + "//" + targetObj.host + "/");
+
+      const res = await fetch(vidUrl, { headers });
+      
+      const responseHeaders = new Headers(res.headers);
+      Object.entries(corsHeaders).forEach(([key, value]) => responseHeaders.set(key, value));
+      responseHeaders.set("Content-Type", "video/mp2t");
+
+      return new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: responseHeaders,
+      });
+    } catch (e) {
+      return new Response("Error: " + e.message, { status: 500, headers: corsHeaders });
+    }
+  }
+
+  return new Response("Invalid request", { status: 400, headers: corsHeaders });
+});
